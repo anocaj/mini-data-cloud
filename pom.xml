@@ -24,7 +24,7 @@
         <protobuf.version>3.25.1</protobuf.version>
         <arrow.version>13.0.0</arrow.version>
         <calcite.version>1.36.0</calcite.version>
-        <iceberg.version>1.5.2</iceberg.version>
+        <iceberg.version>1.4.2</iceberg.version>
         <junit.version>5.10.1</junit.version>
         <testcontainers.version>1.19.3</testcontainers.version>
     </properties>
@@ -95,6 +95,7 @@
                 <artifactId>iceberg-aws</artifactId>
                 <version>${iceberg.version}</version>
             </dependency>
+
 
 
             <!-- AWS SDK for S3 -->

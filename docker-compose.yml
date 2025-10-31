@@ -5,21 +5,29 @@ services:
       dockerfile: minicloud-control-plane/Dockerfile
       target: development
     ports:
-      - "8080:8080"  # REST API
-      - "9090:9090"  # gRPC
+      - "8080:8080" # REST API
+      - "9090:9090" # gRPC
     environment:
       - SPRING_PROFILES_ACTIVE=development
       - DATABASE_URL=jdbc:h2:mem:minicloud
+      - POSTGRES_URL=jdbc:postgresql://metadata-db:5432/minicloud_catalog
+      - POSTGRES_USER=minicloud
+      - POSTGRES_PASSWORD=minicloud123
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
       - MINICLOUD_DOCKER_ENABLED=false
       - MINICLOUD_DATA_PATH=/data
+      - ICEBERG_ENABLED=true
     volumes:
       - ./data:/data
       - ./sample-data:/app/sample-data
-      - /var/run/docker.sock:/var/run/docker.sock  # For Docker API access
+      - /var/run/docker.sock:/var/run/docker.sock # For Docker API access
     networks:
       - minicloud-network
     depends_on:
       - metadata-db
+      - minio
 
   worker-1:
     build:
@@ -27,8 +35,8 @@ services:
       dockerfile: minicloud-worker/Dockerfile
       target: development
     ports:
-      - "8081:8081"  # Worker HTTP
-      - "8082:8082"  # Arrow Flight
+      - "8081:8081" # Worker HTTP
+      - "8082:8082" # Arrow Flight
     environment:
       - WORKER_ID=worker-1
       - CONTROL_PLANE_ENDPOINT=control-plane:9090
@@ -47,8 +55,8 @@ services:
       dockerfile: minicloud-worker/Dockerfile
       target: development
     ports:
-      - "8083:8081"  # Worker HTTP
-      - "8085:8082"  # Arrow Flight
+      - "8083:8081" # Worker HTTP
+      - "8085:8082" # Arrow Flight
     environment:
       - WORKER_ID=worker-2
       - CONTROL_PLANE_ENDPOINT=control-plane:9090
@@ -64,15 +72,48 @@ services:
   metadata-db:
     image: postgres:15
     environment:
-      - POSTGRES_DB=minicloud
+      - POSTGRES_DB=minicloud_catalog
       - POSTGRES_USER=minicloud
-      - POSTGRES_PASSWORD=minicloud
+      - POSTGRES_PASSWORD=minicloud123
     volumes:
       - metadata_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     networks:
       - minicloud-network
+
+  # MinIO for object storage
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - minicloud-network
+
+  # MinIO client for bucket setup
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    networks:
+      - minicloud-network
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin123;
+      /usr/bin/mc mb myminio/iceberg-data;
+      /usr/bin/mc mb myminio/iceberg-metadata;
+      /usr/bin/mc mb myminio/iceberg-stats;
+      /usr/bin/mc mb myminio/iceberg-logs;
+      exit 0;
+      "
 
   prometheus:
     image: prom/prometheus:latest
@@ -100,6 +141,7 @@ services:
 
 volumes:
   metadata_data:
+  minio_data:
   grafana_data:
 
 networks:

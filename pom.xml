@@ -24,7 +24,7 @@
         <protobuf.version>3.25.1</protobuf.version>
         <arrow.version>13.0.0</arrow.version>
         <calcite.version>1.36.0</calcite.version>
-        <iceberg.version>1.4.2</iceberg.version>
+        <iceberg.version>1.5.2</iceberg.version>
         <junit.version>5.10.1</junit.version>
         <testcontainers.version>1.19.3</testcontainers.version>
     </properties>
@@ -89,6 +89,38 @@
                 <groupId>org.apache.iceberg</groupId>
                 <artifactId>iceberg-parquet</artifactId>
                 <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-aws</artifactId>
+                <version>${iceberg.version}</version>
+            </dependency>
+
+
+            <!-- AWS SDK for S3 -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>s3</artifactId>
+                <version>2.21.29</version>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>sts</artifactId>
+                <version>2.21.29</version>
+            </dependency>
+
+            <!-- PostgreSQL for catalog -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.1</version>
+            </dependency>
+
+            <!-- Caching -->
+            <dependency>
+                <groupId>com.github.ben-manes.caffeine</groupId>
+                <artifactId>caffeine</artifactId>
+                <version>3.1.8</version>
             </dependency>
 
             <!-- Testing -->

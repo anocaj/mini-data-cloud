@@ -55,6 +55,25 @@ minicloud:
       row-group-size: 1048576  # 1MB
       page-size: 1048576       # 1MB
   
+  # Iceberg configuration
+  iceberg:
+    enabled: ${ICEBERG_ENABLED:false}
+    catalog:
+      type: hadoop
+      warehouse: s3a://iceberg-data/
+    s3:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin123}
+      path-style-access: true
+      region: us-east-1
+    cache:
+      l1-size: 10000
+      l1-ttl: 300s
+      l2-size: 100000
+      l2-ttl: 3600s
+      l3-enabled: true
+  
   # Docker orchestration configuration
   docker:
     enabled: false  # Disable Docker orchestration when running in containers

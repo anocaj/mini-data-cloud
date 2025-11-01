@@ -1,6 +1,7 @@
 package com.minicloud.controlplane.planner;
 
 import com.minicloud.controlplane.sql.ParsedQuery;
+import com.minicloud.controlplane.sql.SqlParsingService;
 import com.minicloud.proto.execution.QueryExecutionProto.*;
 import com.minicloud.proto.common.CommonProto;
 import org.apache.calcite.rel.RelNode;
@@ -13,6 +14,7 @@ import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.RelVisitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -28,6 +30,15 @@ public class DistributedQueryPlanner {
     private static final Logger logger = LoggerFactory.getLogger(DistributedQueryPlanner.class);
     
     private final AtomicInteger stageIdGenerator = new AtomicInteger(0);
+    private final SqlParsingService sqlParsingService;
+    private final IcebergQueryPlanner icebergQueryPlanner;
+    
+    @Autowired
+    public DistributedQueryPlanner(SqlParsingService sqlParsingService, 
+                                 IcebergQueryPlanner icebergQueryPlanner) {
+        this.sqlParsingService = sqlParsingService;
+        this.icebergQueryPlanner = icebergQueryPlanner;
+    }
     
     /**
      * Create a distributed execution plan from a parsed query
@@ -35,6 +46,27 @@ public class DistributedQueryPlanner {
     public ExecutionPlan createExecutionPlan(String queryId, ParsedQuery parsedQuery) {
         logger.info("Creating distributed execution plan for query: {}", queryId);
         
+        try {
+            // Check if query involves Iceberg tables
+            Set<String> icebergTables = sqlParsingService.identifyIcebergTables(parsedQuery.getOriginalSql());
+            
+            if (!icebergTables.isEmpty()) {
+                logger.info("Query involves Iceberg tables: {}, using Iceberg-optimized planner", icebergTables);
+                return icebergQueryPlanner.createOptimizedExecutionPlan(queryId, parsedQuery);
+            } else {
+                logger.info("Query uses standard tables, using standard planner");
+                return createStandardExecutionPlan(queryId, parsedQuery);
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to create optimized execution plan, falling back to standard planner", e);
+            return createStandardExecutionPlan(queryId, parsedQuery);
+        }
+    }
+    
+    /**
+     * Create a standard execution plan for non-Iceberg queries
+     */
+    private ExecutionPlan createStandardExecutionPlan(String queryId, ParsedQuery parsedQuery) {
         RelNode relNode = parsedQuery.getRelNode();
         List<ExecutionStage> stages = new ArrayList<>();
         
@@ -50,7 +82,7 @@ public class DistributedQueryPlanner {
         
         ExecutionPlan plan = new ExecutionPlan(queryId, parsedQuery.getOriginalSql(), stages);
         
-        logger.info("Created execution plan with {} stages for query {}", stages.size(), queryId);
+        logger.info("Created standard execution plan with {} stages for query {}", stages.size(), queryId);
         return plan;
     }
     

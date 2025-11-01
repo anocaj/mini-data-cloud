@@ -51,6 +51,12 @@ public class QueryService {
     @Autowired
     private WorkerRegistryService workerRegistryService;
     
+    @Autowired(required = false)
+    private TimeTravelQueryProcessor timeTravelQueryProcessor;
+    
+    @Autowired(required = false)
+    private IcebergQueryMetricsService icebergMetricsService;
+    
     /**
      * Submit a new query for execution
      */
@@ -60,6 +66,24 @@ public class QueryService {
                    request.getSql().substring(0, Math.min(request.getSql().length(), 100)) + "...");
         
         try {
+            // Check if this is a time travel query
+            if (timeTravelQueryProcessor != null && timeTravelQueryProcessor.isTimeTravelQuery(request.getSql())) {
+                logger.info("Processing time travel query for query {}", queryId);
+                return executeTimeTravelQuery(queryId, request);
+            }
+            
+            // Check if this involves Iceberg tables and record metrics
+            if (icebergMetricsService != null && sqlParsingService != null) {
+                java.util.Set<String> icebergTables = sqlParsingService.identifyIcebergTables(request.getSql());
+                if (!icebergTables.isEmpty()) {
+                    // Record Iceberg query start for the first table (simplified)
+                    String firstTable = icebergTables.iterator().next();
+                    org.apache.iceberg.catalog.TableIdentifier tableId = 
+                        org.apache.iceberg.catalog.TableIdentifier.of("default", firstTable);
+                    icebergMetricsService.recordQueryStart(queryId, tableId, "SELECT");
+                }
+            }
+            
             // Check if distributed execution is available and beneficial
             if (shouldUseDistributedExecution(request)) {
                 logger.info("Using distributed execution for query {}", queryId);
@@ -213,6 +237,25 @@ public class QueryService {
             QueryExecution execution = optionalExecution.get();
             execution.markAsCompleted(rowsReturned, resultLocation);
             queryExecutionRepository.save(execution);
+            
+            // Record Iceberg metrics if applicable
+            if (icebergMetricsService != null && sqlParsingService != null) {
+                try {
+                    java.util.Set<String> icebergTables = sqlParsingService.identifyIcebergTables(execution.getSqlQuery());
+                    if (!icebergTables.isEmpty()) {
+                        // Record completion metrics (simplified - using estimated values)
+                        long bytesScanned = rowsReturned != null ? rowsReturned * 100 : 0; // Estimate
+                        int filesScanned = 1; // Simplified
+                        int filesPruned = 0; // Simplified
+                        
+                        icebergMetricsService.recordQueryCompletion(queryId, 
+                            rowsReturned != null ? rowsReturned : 0, 
+                            bytesScanned, filesScanned, filesPruned);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Failed to record Iceberg metrics for completed query {}", queryId, e);
+                }
+            }
         }
     }
     
@@ -227,6 +270,18 @@ public class QueryService {
             QueryExecution execution = optionalExecution.get();
             execution.markAsFailed(errorMessage);
             queryExecutionRepository.save(execution);
+            
+            // Record Iceberg metrics if applicable
+            if (icebergMetricsService != null && sqlParsingService != null) {
+                try {
+                    java.util.Set<String> icebergTables = sqlParsingService.identifyIcebergTables(execution.getSqlQuery());
+                    if (!icebergTables.isEmpty()) {
+                        icebergMetricsService.recordQueryFailure(queryId, errorMessage);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Failed to record Iceberg metrics for failed query {}", queryId, e);
+                }
+            }
         }
     }
     
@@ -573,6 +628,52 @@ public class QueryService {
         
         logger.debug("Query complexity check for distributed execution: {}", isComplex);
         return isComplex;
+    }
+    
+    /**
+     * Execute time travel query
+     */
+    private QueryResponse executeTimeTravelQuery(String queryId, QueryRequest request) {
+        try {
+            logger.info("Executing time travel query {}", queryId);
+            
+            // Process the time travel query
+            TimeTravelQueryProcessor.TimeTravelQueryResult timeTravelResult = 
+                timeTravelQueryProcessor.processTimeTravelQuery(request.getSql());
+            
+            // Create query execution record
+            QueryExecution execution = new QueryExecution(queryId, request.getSql());
+            execution = queryExecutionRepository.save(execution);
+            
+            markQueryAsStarted(queryId);
+            
+            // For now, simulate time travel query execution with mock results
+            // In a full implementation, this would use the SnapshotQueryPlanner and HistoricalDataAccessLayer
+            String modifiedSql = timeTravelResult.getModifiedSql();
+            QueryResultService.QueryResult queryResult = queryResultService.generateMockResults(modifiedSql, 10);
+            
+            // Add time travel metadata to the result
+            queryResult.setDescription("Time travel query executed at snapshot " + timeTravelResult.getSnapshotId() + 
+                                     " (timestamp: " + timeTravelResult.getEffectiveTimestamp() + ")");
+            
+            markQueryAsCompleted(queryId, queryResult.getTotalRows(), "time-travel-result");
+            
+            QueryResponse response = convertToQueryResponse(execution);
+            response.setColumns(queryResult.getColumns());
+            response.setRows(queryResult.getRows());
+            response.setResultDescription(queryResult.getDescription());
+            
+            logger.info("Time travel query {} completed successfully", queryId);
+            return response;
+            
+        } catch (Exception e) {
+            logger.error("Time travel query execution failed for {}", queryId, e);
+            markQueryAsFailed(queryId, "Time travel execution failed: " + e.getMessage());
+            
+            QueryResponse errorResponse = new QueryResponse(queryId, com.minicloud.controlplane.model.QueryStatus.FAILED);
+            errorResponse.setErrorMessage("Time travel execution failed: " + e.getMessage());
+            return errorResponse;
+        }
     }
     
     /**

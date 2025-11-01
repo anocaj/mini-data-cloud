@@ -1,5 +1,6 @@
 package com.minicloud.controlplane.service;
 
+import com.minicloud.controlplane.config.IcebergConfiguration;
 import com.minicloud.controlplane.controller.DataLoadingController;
 import com.minicloud.controlplane.dto.TableInfo;
 import com.minicloud.controlplane.model.TableMetadata;
@@ -40,6 +41,12 @@ public class DataLoadingService {
     @Autowired
     private TableRegistrationService tableRegistrationService;
     
+    @Autowired(required = false)
+    private IcebergTableCreationService icebergTableCreationService;
+    
+    @Autowired(required = false)
+    private IcebergConfiguration icebergConfiguration;
+    
     @Value("${minicloud.storage.data-directory:./data}")
     private String dataDirectory;
     
@@ -54,6 +61,63 @@ public class DataLoadingService {
         if (!csvFile.exists()) {
             throw new IllegalArgumentException("CSV file not found: " + csvFilePath);
         }
+        
+        // Check if Iceberg integration is enabled
+        if (isIcebergEnabled()) {
+            return loadCsvDataAsIcebergTable(csvFilePath, namespaceName, tableName, hasHeader);
+        } else {
+            return loadCsvDataAsParquetTable(csvFilePath, namespaceName, tableName, hasHeader);
+        }
+    }
+    
+    /**
+     * Load CSV data as Iceberg table (new implementation)
+     */
+    private LoadResult loadCsvDataAsIcebergTable(String csvFilePath, String namespaceName, 
+                                               String tableName, boolean hasHeader) {
+        logger.info("Loading CSV data as Iceberg table: {}.{}", namespaceName, tableName);
+        
+        try {
+            // Create Iceberg table from CSV
+            IcebergTableCreationService.TableCreationResult result = 
+                icebergTableCreationService.createTableFromCsv(csvFilePath, namespaceName, tableName, hasHeader);
+            
+            // Register table in metadata service for backward compatibility
+            String schemaDefinition = convertIcebergSchemaToString(result.getSchema());
+            TableInfo tableInfo = metadataService.registerTable(
+                namespaceName, tableName, result.getTableLocation(), schemaDefinition);
+            
+            // Update table statistics
+            metadataService.updateTableStatistics(namespaceName, tableName, 
+                                                result.getRowCount(), 0L); // File size not available for Iceberg
+            
+            // Register table with Calcite schema for SQL queries
+            tableRegistrationService.registerTable(tableName, tableInfo);
+            
+            logger.info("Successfully loaded {} rows into Iceberg table {}.{}", 
+                       result.getRowCount(), namespaceName, tableName);
+            
+            return new LoadResult(
+                tableName,
+                result.getRowCount(),
+                0L, // File size not directly available for Iceberg
+                result.getDurationMs(),
+                result.getTableLocation(),
+                null // Arrow schema not available for Iceberg
+            );
+            
+        } catch (Exception e) {
+            logger.error("Failed to load CSV as Iceberg table", e);
+            throw new RuntimeException("Failed to load CSV as Iceberg table: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Load CSV data as traditional Parquet table (existing implementation)
+     */
+    private LoadResult loadCsvDataAsParquetTable(String csvFilePath, String namespaceName, 
+                                               String tableName, boolean hasHeader) {
+        logger.info("Loading CSV data as Parquet table: {}.{}", namespaceName, tableName);
         
         // Create table location
         String tableLocation = Paths.get(dataDirectory, namespaceName, tableName).toString();
@@ -74,7 +138,7 @@ public class DataLoadingService {
         // Register table with Calcite schema for SQL queries
         tableRegistrationService.registerTable(tableName, tableInfo);
         
-        logger.info("Successfully loaded {} rows into table {}.{}", 
+        logger.info("Successfully loaded {} rows into Parquet table {}.{}", 
                    storageResult.getRowCount(), namespaceName, tableName);
         
         return new LoadResult(
@@ -175,6 +239,33 @@ public class DataLoadingService {
         }
         
         return sb.toString();
+    }
+    
+    /**
+     * Convert Iceberg schema to string representation
+     */
+    private String convertIcebergSchemaToString(org.apache.iceberg.Schema schema) {
+        if (schema == null) {
+            return "UNKNOWN";
+        }
+        
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < schema.columns().size(); i++) {
+            if (i > 0) sb.append(", ");
+            org.apache.iceberg.types.Types.NestedField field = schema.columns().get(i);
+            sb.append(field.name()).append(" ").append(field.type().toString());
+        }
+        
+        return sb.toString();
+    }
+    
+    /**
+     * Check if Iceberg integration is enabled
+     */
+    private boolean isIcebergEnabled() {
+        return icebergConfiguration != null && 
+               icebergConfiguration.isEnabled() && 
+               icebergTableCreationService != null;
     }
     
     /**

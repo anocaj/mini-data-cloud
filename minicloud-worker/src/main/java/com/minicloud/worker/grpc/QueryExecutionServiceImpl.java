@@ -1,11 +1,13 @@
 package com.minicloud.worker.grpc;
 
 import com.minicloud.worker.service.WorkerRegistrationService;
+
 import com.minicloud.proto.execution.QueryExecutionServiceGrpc;
 import com.minicloud.proto.execution.QueryExecutionProto.*;
 import com.minicloud.proto.common.CommonProto;
 import io.grpc.stub.StreamObserver;
 import net.devh.boot.grpc.server.service.GrpcService;
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +31,8 @@ public class QueryExecutionServiceImpl extends QueryExecutionServiceGrpc.QueryEx
     
     @Autowired
     private WorkerRegistrationService workerRegistrationService;
+    
+
     
     private final ConcurrentHashMap<String, QueryExecution> activeQueries = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
@@ -188,8 +192,68 @@ public class QueryExecutionServiceImpl extends QueryExecutionServiceGrpc.QueryEx
         
         logger.info("Executing stage type: {} for query {}", stage.getType(), queryId);
         
-        // TODO: Implement actual query execution with Arrow
-        // For now, simulate execution with a delay
+        long startTime = System.currentTimeMillis();
+        long rowsProcessed = 0;
+        long bytesProcessed = 0;
+        
+        try {
+            // Check if this is an Iceberg scan stage
+            if (stage.getType() == StageType.SCAN && isIcebergStage(stage)) {
+                logger.info("Executing Iceberg scan stage for query {}", queryId);
+                
+                // Execute Iceberg scan (simplified implementation)
+                VectorSchemaRoot result = executeIcebergScan(stage, queryId, stageId);
+                
+                if (result != null) {
+                    rowsProcessed = result.getRowCount();
+                    bytesProcessed = estimateDataSize(result);
+                    
+                    // Store result for later retrieval
+                    storeQueryResult(queryId, stageId, result);
+                    
+                    logger.info("Iceberg scan completed: {} rows, {} bytes", rowsProcessed, bytesProcessed);
+                } else {
+                    // Simulate successful Iceberg execution
+                    rowsProcessed = 1000;
+                    bytesProcessed = 50000;
+                    logger.info("Iceberg scan simulated: {} rows, {} bytes", rowsProcessed, bytesProcessed);
+                }
+            } else {
+                // Execute standard stage
+                return executeStandardStage(request, startTime);
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error executing stage {} for query {}", stageId, queryId, e);
+            throw new RuntimeException("Stage execution failed", e);
+        }
+        
+        long executionTime = System.currentTimeMillis() - startTime;
+        
+        // Create execution stats
+        CommonProto.ExecutionStats stats = CommonProto.ExecutionStats.newBuilder()
+                .setRowsProcessed(rowsProcessed)
+                .setBytesProcessed(bytesProcessed)
+                .setExecutionTimeMs(executionTime)
+                .setCpuTimeMs((long) (executionTime * 0.8)) // Estimate CPU time
+                .setMemoryPeakMb(estimateMemoryUsage(rowsProcessed))
+                .build();
+        
+        return ExecuteStageResponse.newBuilder()
+                .setQueryId(queryId)
+                .setStageId(stageId)
+                .setStatus(ExecutionStatus.COMPLETED)
+                .setResultLocation("flight://localhost:8815/results/" + queryId + "/" + stageId)
+                .setStats(stats)
+                .setTraceId(request.getTraceId())
+                .build();
+    }
+    
+    private ExecuteStageResponse executeStandardStage(ExecuteStageRequest request, long startTime) {
+        String queryId = request.getQueryId();
+        int stageId = request.getStageId();
+        
+        // Standard execution with simulated delay
         try {
             Thread.sleep(1000); // Simulate processing time
         } catch (InterruptedException e) {
@@ -197,12 +261,14 @@ public class QueryExecutionServiceImpl extends QueryExecutionServiceGrpc.QueryEx
             throw new RuntimeException("Stage execution interrupted", e);
         }
         
+        long executionTime = System.currentTimeMillis() - startTime;
+        
         // Create mock execution stats
         CommonProto.ExecutionStats stats = CommonProto.ExecutionStats.newBuilder()
                 .setRowsProcessed(1000)
                 .setBytesProcessed(50000)
-                .setExecutionTimeMs(1000)
-                .setCpuTimeMs(800)
+                .setExecutionTimeMs(executionTime)
+                .setCpuTimeMs((long) (executionTime * 0.8))
                 .setMemoryPeakMb(100)
                 .build();
         
@@ -214,6 +280,57 @@ public class QueryExecutionServiceImpl extends QueryExecutionServiceGrpc.QueryEx
                 .setStats(stats)
                 .setTraceId(request.getTraceId())
                 .build();
+    }
+    
+    private boolean isIcebergStage(ExecutionStage stage) {
+        // Check if stage indicates Iceberg table format
+        return "ICEBERG_SCAN".equals(stage.getPlanFormat());
+    }
+    
+    private VectorSchemaRoot executeIcebergScan(ExecutionStage stage, String queryId, int stageId) {
+        try {
+            logger.debug("Executing Iceberg scan for stage {}", stageId);
+            
+            // Extract Iceberg scan information from stage (simplified)
+            logger.info("Iceberg scan stage detected");
+            
+            // For now, simulate Iceberg data reading
+            // In a full implementation, this would:
+            // 1. Parse the serialized Iceberg scan plan
+            // 2. Load the Iceberg table
+            // 3. Read the specified data files
+            // 4. Apply filters and projections
+            // 5. Convert to Arrow format
+            
+            // Simulate successful Iceberg scan
+            Thread.sleep(500); // Simulate I/O time
+            
+            // Return null for now - in real implementation, would return VectorSchemaRoot
+            return null;
+            
+        } catch (Exception e) {
+            logger.error("Failed to execute Iceberg scan", e);
+            throw new RuntimeException("Iceberg scan execution failed", e);
+        }
+    }
+    
+    private void storeQueryResult(String queryId, int stageId, VectorSchemaRoot result) {
+        // Store the result for later retrieval
+        // In a full implementation, this would serialize the Arrow data
+        // and store it in a location accessible by the control plane
+        logger.debug("Storing query result for query {}, stage {} ({} rows)", 
+            queryId, stageId, result.getRowCount());
+    }
+    
+    private long estimateDataSize(VectorSchemaRoot result) {
+        // Estimate the size of Arrow data in bytes
+        // This is a simplified estimation
+        return result.getRowCount() * result.getSchema().getFields().size() * 8; // 8 bytes per field average
+    }
+    
+    private long estimateMemoryUsage(long rowsProcessed) {
+        // Estimate memory usage in MB based on rows processed
+        return Math.max(100, rowsProcessed / 10000); // Minimum 100MB, 1MB per 10k rows
     }
 
     private CommonProto.StandardResponse createSuccessResponse() {

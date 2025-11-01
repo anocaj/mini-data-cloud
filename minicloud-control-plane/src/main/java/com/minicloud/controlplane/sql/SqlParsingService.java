@@ -1,5 +1,6 @@
 package com.minicloud.controlplane.sql;
 
+import com.minicloud.controlplane.service.GlobalCatalogService;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
@@ -15,10 +16,14 @@ import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.Planner;
 import org.apache.calcite.tools.RelConversionException;
 import org.apache.calcite.tools.ValidationException;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Service for parsing and validating SQL queries using Apache Calcite
@@ -30,12 +35,15 @@ public class SqlParsingService {
     
     private final FrameworkConfig frameworkConfig;
     private final SqlValidator sqlValidator;
+    private final GlobalCatalogService catalogService;
     
     @Autowired
-    public SqlParsingService(FrameworkConfig frameworkConfig, SqlValidator sqlValidator) {
+    public SqlParsingService(FrameworkConfig frameworkConfig, SqlValidator sqlValidator, 
+                           GlobalCatalogService catalogService) {
         this.frameworkConfig = frameworkConfig;
         this.sqlValidator = sqlValidator;
-        logger.info("SQL parsing service initialized with Calcite framework");
+        this.catalogService = catalogService;
+        logger.info("SQL parsing service initialized with Calcite framework and Iceberg catalog support");
     }
     
     /**
@@ -140,6 +148,91 @@ public class SqlParsingService {
             return SqlFeatureValidator.getUnsupportedFeatureReason(sqlNode);
         } catch (Exception e) {
             return "Query parsing failed: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * Checks if a table reference in the query is an Iceberg table.
+     */
+    public boolean isIcebergTable(String tableName) {
+        if (catalogService == null || !catalogService.isEnabled()) {
+            return false;
+        }
+        
+        try {
+            // Try to resolve as Iceberg table
+            TableIdentifier tableId = TableIdentifier.of("default", tableName);
+            return catalogService.tableExists(tableId);
+        } catch (Exception e) {
+            logger.debug("Table {} is not an Iceberg table: {}", tableName, e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Extracts table references from a parsed SQL query.
+     */
+    public Set<String> extractTableReferences(SqlNode sqlNode) {
+        Set<String> tableNames = new HashSet<>();
+        
+        try {
+            // Use a visitor to extract table names from the SQL AST
+            SqlTableExtractor extractor = new SqlTableExtractor();
+            sqlNode.accept(extractor);
+            tableNames.addAll(extractor.getTableNames());
+            
+            logger.debug("Extracted table references: {}", tableNames);
+        } catch (Exception e) {
+            logger.warn("Failed to extract table references from SQL", e);
+        }
+        
+        return tableNames;
+    }
+    
+    /**
+     * Identifies which tables in a query are Iceberg tables.
+     */
+    public Set<String> identifyIcebergTables(String sql) {
+        Set<String> icebergTables = new HashSet<>();
+        
+        try {
+            SqlNode sqlNode = parseQuery(sql);
+            Set<String> allTables = extractTableReferences(sqlNode);
+            
+            for (String tableName : allTables) {
+                if (isIcebergTable(tableName)) {
+                    icebergTables.add(tableName);
+                }
+            }
+            
+            logger.debug("Identified Iceberg tables in query: {}", icebergTables);
+        } catch (Exception e) {
+            logger.warn("Failed to identify Iceberg tables in query", e);
+        }
+        
+        return icebergTables;
+    }
+    
+    /**
+     * Simple visitor to extract table names from SQL AST.
+     */
+    private static class SqlTableExtractor extends org.apache.calcite.sql.util.SqlBasicVisitor<Void> {
+        private final Set<String> tableNames = new HashSet<>();
+        
+        @Override
+        public Void visit(org.apache.calcite.sql.SqlIdentifier id) {
+            if (id.names.size() == 1) {
+                // Simple table name
+                tableNames.add(id.names.get(0));
+            } else if (id.names.size() == 2) {
+                // Schema.table format - use table name
+                tableNames.add(id.names.get(1));
+            }
+            return null;
+        }
+        
+        public Set<String> getTableNames() {
+            return tableNames;
         }
     }
 }

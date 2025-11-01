@@ -102,7 +102,7 @@ public class DataLoadingController {
     }
 
     /**
-     * Load CSV data into a table
+     * Load CSV data into a table (automatically chooses Iceberg or Parquet based on configuration)
      */
     @PostMapping("/load/csv")
     public ResponseEntity<LoadDataResponse> loadCsvData(@RequestBody LoadCsvRequest request) {

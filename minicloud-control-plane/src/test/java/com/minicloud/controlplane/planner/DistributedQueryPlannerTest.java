@@ -1,6 +1,7 @@
 package com.minicloud.controlplane.planner;
 
 import com.minicloud.controlplane.sql.ParsedQuery;
+import com.minicloud.controlplane.sql.SqlParsingService;
 import com.minicloud.proto.execution.QueryExecutionProto.ExecutionStage;
 import com.minicloud.proto.execution.QueryExecutionProto.StageType;
 import org.apache.calcite.rel.RelNode;
@@ -31,9 +32,15 @@ class DistributedQueryPlannerTest {
     @Mock
     private SqlNode mockSqlNode;
     
+    @Mock
+    private SqlParsingService sqlParsingService;
+    
+    @Mock
+    private IcebergQueryPlanner icebergQueryPlanner;
+    
     @BeforeEach
     void setUp() {
-        queryPlanner = new DistributedQueryPlanner();
+        queryPlanner = new DistributedQueryPlanner(sqlParsingService, icebergQueryPlanner);
     }
     
     @Test

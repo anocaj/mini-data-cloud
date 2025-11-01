@@ -139,6 +139,12 @@
             <artifactId>caffeine</artifactId>
         </dependency>
 
+        <!-- Micrometer Prometheus for metrics -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- gRPC Server -->
         <dependency>
             <groupId>io.grpc</groupId>

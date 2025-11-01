@@ -1,6 +1,8 @@
 package com.minicloud.controlplane.controller;
 
 import com.minicloud.controlplane.service.IcebergQueryMetricsService;
+import com.minicloud.controlplane.service.IcebergCatalogMetricsService;
+import com.minicloud.controlplane.service.NYCDatasetMetricsService;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,11 +24,17 @@ public class IcebergMetricsController {
     
     private static final Logger logger = LoggerFactory.getLogger(IcebergMetricsController.class);
     
-    private final IcebergQueryMetricsService metricsService;
+    private final IcebergQueryMetricsService queryMetricsService;
+    private final IcebergCatalogMetricsService catalogMetricsService;
+    private final NYCDatasetMetricsService nycDatasetMetricsService;
     
     @Autowired
-    public IcebergMetricsController(IcebergQueryMetricsService metricsService) {
-        this.metricsService = metricsService;
+    public IcebergMetricsController(IcebergQueryMetricsService queryMetricsService,
+                                  IcebergCatalogMetricsService catalogMetricsService,
+                                  NYCDatasetMetricsService nycDatasetMetricsService) {
+        this.queryMetricsService = queryMetricsService;
+        this.catalogMetricsService = catalogMetricsService;
+        this.nycDatasetMetricsService = nycDatasetMetricsService;
     }
     
     /**
@@ -38,7 +46,7 @@ public class IcebergMetricsController {
             logger.debug("Getting overall Iceberg performance metrics");
             
             IcebergQueryMetricsService.IcebergPerformanceMetrics metrics = 
-                metricsService.getOverallPerformanceMetrics();
+                queryMetricsService.getOverallPerformanceMetrics();
             
             return ResponseEntity.ok(metrics);
             
@@ -61,7 +69,7 @@ public class IcebergMetricsController {
             
             TableIdentifier tableId = TableIdentifier.of(namespace, tableName);
             IcebergQueryMetricsService.TablePerformanceMetrics metrics = 
-                metricsService.getTablePerformanceMetrics(tableId);
+                queryMetricsService.getTablePerformanceMetrics(tableId);
             
             return ResponseEntity.ok(metrics);
             
@@ -80,7 +88,7 @@ public class IcebergMetricsController {
             logger.debug("Getting Iceberg metrics summary");
             
             IcebergQueryMetricsService.IcebergPerformanceMetrics metrics = 
-                metricsService.getOverallPerformanceMetrics();
+                queryMetricsService.getOverallPerformanceMetrics();
             
             Map<String, Object> summary = new HashMap<>();
             summary.put("total_queries", metrics.getTotalQueries());
@@ -117,7 +125,7 @@ public class IcebergMetricsController {
             logger.debug("Recording query start: {} for table: {}.{}", queryId, namespace, tableName);
             
             TableIdentifier tableId = TableIdentifier.of(namespace, tableName);
-            metricsService.recordQueryStart(queryId, tableId, queryType);
+            queryMetricsService.recordQueryStart(queryId, tableId, queryType);
             
             return ResponseEntity.ok().build();
             
@@ -142,7 +150,7 @@ public class IcebergMetricsController {
             logger.debug("Recording query completion: {} ({} rows, {} bytes, {} files scanned, {} files pruned)", 
                 queryId, rowsReturned, bytesScanned, filesScanned, filesPruned);
             
-            metricsService.recordQueryCompletion(queryId, rowsReturned, bytesScanned, filesScanned, filesPruned);
+            queryMetricsService.recordQueryCompletion(queryId, rowsReturned, bytesScanned, filesScanned, filesPruned);
             
             return ResponseEntity.ok().build();
             
@@ -163,7 +171,7 @@ public class IcebergMetricsController {
         try {
             logger.debug("Recording query failure: {} - {}", queryId, errorMessage);
             
-            metricsService.recordQueryFailure(queryId, errorMessage);
+            queryMetricsService.recordQueryFailure(queryId, errorMessage);
             
             return ResponseEntity.ok().build();
             
@@ -191,7 +199,7 @@ public class IcebergMetricsController {
             java.time.Instant timestamp = targetTimestamp != null ? 
                 java.time.Instant.parse(targetTimestamp) : null;
             
-            metricsService.recordTimeTravelQueryStart(queryId, tableId, timestamp, snapshotId);
+            queryMetricsService.recordTimeTravelQueryStart(queryId, tableId, timestamp, snapshotId);
             
             return ResponseEntity.ok().build();
             
@@ -215,7 +223,7 @@ public class IcebergMetricsController {
             logger.debug("Recording time travel query completion: {} ({} rows, {} snapshots evaluated, snapshot found: {})", 
                 queryId, rowsReturned, snapshotsEvaluated, snapshotFound);
             
-            metricsService.recordTimeTravelQueryCompletion(queryId, rowsReturned, snapshotsEvaluated, snapshotFound);
+            queryMetricsService.recordTimeTravelQueryCompletion(queryId, rowsReturned, snapshotsEvaluated, snapshotFound);
             
             return ResponseEntity.ok().build();
             
@@ -240,7 +248,7 @@ public class IcebergMetricsController {
                 transactionId, namespace, tableName, operationType);
             
             TableIdentifier tableId = TableIdentifier.of(namespace, tableName);
-            metricsService.recordTransactionStart(transactionId, tableId, operationType);
+            queryMetricsService.recordTransactionStart(transactionId, tableId, operationType);
             
             return ResponseEntity.ok().build();
             
@@ -265,7 +273,7 @@ public class IcebergMetricsController {
             logger.debug("Recording transaction completion: {} ({} rows affected, {} files added, {} files deleted, committed: {})", 
                 transactionId, rowsAffected, filesAdded, filesDeleted, committed);
             
-            metricsService.recordTransactionCompletion(transactionId, rowsAffected, filesAdded, filesDeleted, committed);
+            queryMetricsService.recordTransactionCompletion(transactionId, rowsAffected, filesAdded, filesDeleted, committed);
             
             return ResponseEntity.ok().build();
             
@@ -275,6 +283,98 @@ public class IcebergMetricsController {
         }
     }
     
+    /**
+     * Gets catalog performance metrics.
+     */
+    @GetMapping("/catalog/performance")
+    public ResponseEntity<IcebergCatalogMetricsService.CatalogPerformanceMetrics> getCatalogPerformanceMetrics() {
+        try {
+            logger.debug("Getting catalog performance metrics");
+            
+            IcebergCatalogMetricsService.CatalogPerformanceMetrics metrics = 
+                catalogMetricsService.getCatalogPerformanceMetrics();
+            
+            return ResponseEntity.ok(metrics);
+            
+        } catch (Exception e) {
+            logger.error("Failed to get catalog performance metrics", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Gets NYC dataset performance metrics.
+     */
+    @GetMapping("/nyc/performance")
+    public ResponseEntity<NYCDatasetMetricsService.NYCDatasetPerformanceMetrics> getNYCDatasetPerformanceMetrics() {
+        try {
+            logger.debug("Getting NYC dataset performance metrics");
+            
+            NYCDatasetMetricsService.NYCDatasetPerformanceMetrics metrics = 
+                nycDatasetMetricsService.getPerformanceMetrics();
+            
+            return ResponseEntity.ok(metrics);
+            
+        } catch (Exception e) {
+            logger.error("Failed to get NYC dataset performance metrics", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Gets metrics for a specific NYC dataset.
+     */
+    @GetMapping("/nyc/dataset/{dataset}")
+    public ResponseEntity<NYCDatasetMetricsService.DatasetMetrics> getDatasetMetrics(
+            @PathVariable String dataset) {
+        
+        try {
+            logger.debug("Getting metrics for NYC dataset: {}", dataset);
+            
+            NYCDatasetMetricsService.DatasetMetrics metrics = 
+                nycDatasetMetricsService.getDatasetMetrics(dataset);
+            
+            return ResponseEntity.ok(metrics);
+            
+        } catch (Exception e) {
+            logger.error("Failed to get metrics for dataset: {}", dataset, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    /**
+     * Gets comprehensive metrics summary including all services.
+     */
+    @GetMapping("/comprehensive")
+    public ResponseEntity<Map<String, Object>> getComprehensiveMetrics() {
+        try {
+            logger.debug("Getting comprehensive Iceberg metrics");
+            
+            Map<String, Object> comprehensive = new HashMap<>();
+            
+            // Query metrics
+            IcebergQueryMetricsService.IcebergPerformanceMetrics queryMetrics = 
+                queryMetricsService.getOverallPerformanceMetrics();
+            comprehensive.put("query_metrics", queryMetrics);
+            
+            // Catalog metrics
+            IcebergCatalogMetricsService.CatalogPerformanceMetrics catalogMetrics = 
+                catalogMetricsService.getCatalogPerformanceMetrics();
+            comprehensive.put("catalog_metrics", catalogMetrics);
+            
+            // NYC dataset metrics
+            NYCDatasetMetricsService.NYCDatasetPerformanceMetrics nycMetrics = 
+                nycDatasetMetricsService.getPerformanceMetrics();
+            comprehensive.put("nyc_dataset_metrics", nycMetrics);
+            
+            return ResponseEntity.ok(comprehensive);
+            
+        } catch (Exception e) {
+            logger.error("Failed to get comprehensive metrics", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     /**
      * Health check endpoint for metrics service.
      */
@@ -288,7 +388,7 @@ public class IcebergMetricsController {
             
             // Add basic metrics as health indicators
             IcebergQueryMetricsService.IcebergPerformanceMetrics metrics = 
-                metricsService.getOverallPerformanceMetrics();
+                queryMetricsService.getOverallPerformanceMetrics();
             
             health.put("active_queries", metrics.getActiveQueries());
             health.put("active_transactions", metrics.getActiveTransactions());

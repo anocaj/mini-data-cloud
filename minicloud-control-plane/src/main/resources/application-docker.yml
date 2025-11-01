@@ -1,0 +1,69 @@
+spring:
+  # PostgreSQL configuration for Docker environment
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://metadata-db:5432/minicloud_catalog}
+    username: ${POSTGRES_USER:minicloud}
+    password: ${POSTGRES_PASSWORD:minicloud123}
+    driver-class-name: org.postgresql.Driver
+  
+  # JPA configuration for PostgreSQL
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate  # Don't auto-create tables, use our init scripts
+    show-sql: false  # Reduce log noise in Docker
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          lob:
+            non_contextual_creation: true
+
+# Iceberg configuration for Docker environment
+minicloud:
+  iceberg:
+    enabled: true
+    catalog:
+      type: jdbc
+      uri: ${POSTGRES_URL:jdbc:postgresql://metadata-db:5432/minicloud_catalog}
+      warehouse: s3a://iceberg-data/
+      jdbc:
+        username: ${POSTGRES_USER:minicloud}
+        password: ${POSTGRES_PASSWORD:minicloud123}
+        schema-name: iceberg_catalog
+    s3:
+      endpoint: ${MINIO_ENDPOINT:http://minio:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin123}
+      path-style-access: true
+      region: us-east-1
+    cache:
+      l1-size: 10000
+      l1-ttl: 300s
+      l2-size: 100000
+      l2-ttl: 3600s
+      l3-enabled: true
+  
+  # Docker orchestration disabled when running in containers
+  docker:
+    enabled: false
+  
+  # Storage configuration for Docker
+  storage:
+    data-directory: /data
+    temp-directory: /tmp/minicloud
+    parquet:
+      compression: SNAPPY
+      row-group-size: 1048576
+      page-size: 1048576
+
+# Logging configuration for Docker
+logging:
+  level:
+    com.minicloud: INFO
+    org.springframework.web: INFO
+    io.grpc: INFO
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
